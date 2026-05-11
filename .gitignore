@@ -1,0 +1,10 @@
+.env
+.env.*
+.claude/
+*.db
+*.sqlite
+*.sqlite3
+bin/
+dist/
+coverage.out
+.gocache/
