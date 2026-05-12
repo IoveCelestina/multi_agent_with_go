@@ -101,3 +101,26 @@ Use fast-forward merge when possible:
 git switch main
 git merge --ff-only <branch-name>
 ```
+
+## Pre-Commit Checks
+
+Install the local Git hook once per clone:
+
+```powershell
+.\scripts\install-git-hooks.ps1
+```
+
+Run the same checks manually:
+
+```powershell
+.\scripts\pre-commit.ps1
+```
+
+The pre-commit check enforces the branch naming rule, blocks common secret files,
+checks Go filenames, verifies `gofmt`, and runs `go vet ./...` and `go test ./...`.
+
+For exceptional repository maintenance commits on `main`, run the script with:
+
+```powershell
+.\scripts\pre-commit.ps1 -AllowMain
+```
