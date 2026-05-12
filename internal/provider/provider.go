@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 )
 
-// Role identifies a model conversation message role.
+// 表示模型对话消息角色。
 type Role string
 
 const (
@@ -15,7 +15,7 @@ const (
 	RoleTool      Role = "tool"
 )
 
-// Message is one message sent to a model provider.
+// 表示发送给模型 provider 的一条消息。
 type Message struct {
 	Role       Role
 	Content    string
@@ -24,21 +24,21 @@ type Message struct {
 	Name       string
 }
 
-// ToolCall is one completed tool call requested by a model.
+// 表示模型请求的一次完整工具调用。
 type ToolCall struct {
 	ID        string
 	Name      string
 	Arguments string
 }
 
-// ToolSpec describes one tool that a provider may expose to the model.
+// 描述 provider 可以暴露给模型的一个工具。
 type ToolSpec struct {
 	Name        string
 	Description string
 	JSONSchema  json.RawMessage
 }
 
-// ChatRequest is a normalized streaming chat request.
+// 归一化后的流式聊天请求。
 type ChatRequest struct {
 	Messages    []Message
 	Tools       []ToolSpec
@@ -46,7 +46,7 @@ type ChatRequest struct {
 	MaxTokens   int
 }
 
-// EventKind identifies the kind of streamed provider event.
+// 表示 provider 流式事件类型。
 type EventKind int
 
 const (
@@ -56,7 +56,7 @@ const (
 	EventError
 )
 
-// FinishReason identifies why a model response stopped.
+// 表示模型响应停止的原因。
 type FinishReason string
 
 const (
@@ -65,7 +65,7 @@ const (
 	FinishLength    FinishReason = "length"
 )
 
-// Event is one normalized streaming provider event.
+// 归一化后的 provider 流式事件。
 type Event struct {
 	Kind         EventKind
 	TextDelta    string
@@ -74,7 +74,7 @@ type Event struct {
 	Err          error
 }
 
-// Provider is the smallest shared model provider interface.
+// 模型 provider 的最小公共接口。
 type Provider interface {
 	Name() string
 	Stream(ctx context.Context, req ChatRequest) (<-chan Event, error)

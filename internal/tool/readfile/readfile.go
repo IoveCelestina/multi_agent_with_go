@@ -36,7 +36,7 @@ var schema = json.RawMessage(`{
   "required": ["path"]
 }`)
 
-// Tool reads files from explicitly allowed roots.
+// 从显式允许的 roots 中读取文件。
 type Tool struct {
 	Roots    []string
 	MaxBytes int64
@@ -50,7 +50,7 @@ type arguments struct {
 	Limit  *int64 `json:"limit"`
 }
 
-// New creates a read_file tool and validates its sandbox roots.
+// 创建 read_file 工具，并校验它的沙箱 roots。
 func New(roots []string, maxBytes int64) (*Tool, error) {
 	t := &Tool{
 		Roots:    append([]string(nil), roots...),
@@ -63,22 +63,22 @@ func New(roots []string, maxBytes int64) (*Tool, error) {
 	return t, nil
 }
 
-// Name returns the tool name exposed to models.
+// 返回暴露给模型的工具名。
 func (t *Tool) Name() string {
 	return "read_file"
 }
 
-// Description returns the tool description exposed to models.
+// 返回暴露给模型的工具描述。
 func (t *Tool) Description() string {
 	return "Read a UTF-8 text file from an allowed workspace path."
 }
 
-// JSONSchema returns the model-facing parameter schema.
+// 返回给模型看的参数 schema。
 func (t *Tool) JSONSchema() json.RawMessage {
 	return schema
 }
 
-// Execute reads the requested file range.
+// 读取请求的文件片段。
 func (t *Tool) Execute(ctx context.Context, args json.RawMessage) (tool.Result, error) {
 	if err := ctx.Err(); err != nil {
 		return tool.Result{}, err

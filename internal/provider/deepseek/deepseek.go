@@ -20,7 +20,7 @@ import (
 
 const defaultResponseHeaderTimeout = 30 * time.Second
 
-// Provider implements DeepSeek's OpenAI-compatible chat completions API.
+// 实现 DeepSeek 的 OpenAI-compatible chat completions API。
 type Provider struct {
 	name       string
 	baseURL    string
@@ -29,7 +29,7 @@ type Provider struct {
 	httpClient *http.Client
 }
 
-// New creates a DeepSeek provider.
+// 创建 DeepSeek provider。
 func New(cfg config.ProviderConfig, client *http.Client) (*Provider, error) {
 	if cfg.BaseURL == "" {
 		return nil, fmt.Errorf("create deepseek provider: base_url is required")
@@ -58,12 +58,12 @@ func New(cfg config.ProviderConfig, client *http.Client) (*Provider, error) {
 	}, nil
 }
 
-// Name returns the provider name.
+// 返回 provider 名称。
 func (p *Provider) Name() string {
 	return p.name
 }
 
-// Stream starts a streaming chat completion request.
+// 启动一次流式 chat completion 请求。
 func (p *Provider) Stream(ctx context.Context, req provider.ChatRequest) (<-chan provider.Event, error) {
 	body, err := p.buildRequestBody(req)
 	if err != nil {

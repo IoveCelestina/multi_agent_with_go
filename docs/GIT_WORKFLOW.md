@@ -1,24 +1,24 @@
-# Git Workflow
+# Git 工作流
 
-This project uses short-lived review branches. Changes should be made on a review branch, checked, committed, reviewed, and then merged back to `main`.
+本项目使用短生命周期 review 分支。常规改动应在 review 分支上完成，检查、提交、审查后再合并回 `main`。
 
-## Branch Naming
+## 分支命名
 
-Branch names use this format:
+分支名格式：
 
 ```text
 ht<year_last><month><day_code>-dev<n>
 ```
 
-Parts:
+各部分含义：
 
-- `ht`: fixed prefix.
-- `year_last`: the last digit of the year.
-- `month`: month number, without leading zero.
-- `day_code`: day of month. Use digits `1`-`9` for days 1-9, and letters `a`-`v` for days 10-31.
-- `dev<n>`: development sequence for that day, starting at `dev1`.
+- `ht`：固定前缀。
+- `year_last`：年份最后一位。
+- `month`：月份数字，不补零。
+- `day_code`：日期编码。1-9 日使用数字 `1`-`9`，10-31 日使用字母 `a`-`v`。
+- `dev<n>`：当天开发序号，从 `dev1` 开始。
 
-Day code mapping:
+日期编码：
 
 ```text
 1  -> 1
@@ -54,7 +54,7 @@ Day code mapping:
 31 -> v
 ```
 
-Examples:
+示例：
 
 ```text
 2026-05-11 dev1 -> ht65b-dev1
@@ -63,63 +63,62 @@ Examples:
 2026-12-31 dev1 -> ht612v-dev1
 ```
 
-## Creating A Branch
+## 创建分支
 
-Use the helper script from `main`:
+从 `main` 使用脚本创建：
 
 ```powershell
 .\scripts\new-branch.ps1
 ```
 
-Create the second branch for the same day:
+创建同一天第二个分支：
 
 ```powershell
 .\scripts\new-branch.ps1 -Dev 2
 ```
 
-Create an explicit branch:
+创建指定分支名：
 
 ```powershell
 .\scripts\new-branch.ps1 ht65b-dev3
 ```
 
-The script refuses to create a branch from a dirty working tree unless `-AllowDirty` is passed.
+默认情况下，脚本会拒绝从脏工作区创建分支。确实要保留当前改动并切分支时，使用 `-AllowDirty`。
 
-## Merge Rule
+## 合并规则
 
-Do not commit directly to `main` for normal changes.
+常规改动不要直接提交到 `main`。
 
-Workflow:
+流程：
 
 ```text
-main -> review branch -> commit -> review -> merge to main
+main -> review 分支 -> commit -> review -> merge 到 main
 ```
 
-Use fast-forward merge when possible:
+能 fast-forward 时使用：
 
 ```powershell
 git switch main
 git merge --ff-only <branch-name>
 ```
 
-## Pre-Commit Checks
+## Pre-Commit 检查
 
-Install the local Git hook once per clone:
+每个 clone 安装一次本地 Git hook：
 
 ```powershell
 .\scripts\install-git-hooks.ps1
 ```
 
-Run the same checks manually:
+手动运行同一套检查：
 
 ```powershell
 .\scripts\pre-commit.ps1
 ```
 
-The pre-commit check enforces the branch naming rule, blocks common secret files,
-checks Go filenames, verifies `gofmt`, and runs `go vet ./...` and `go test ./...`.
+pre-commit 会检查分支命名、阻止常见密钥文件、扫描 staged diff 里的疑似密钥、检查 Go 文件名、验证 `gofmt`，并运行 `go vet ./...` 和 `go test ./...`。
 
-For exceptional repository maintenance commits on `main`, run the script with:
+如果是少数仓库维护提交，确实需要在 `main` 上手动运行检查，可以使用：
 
 ```powershell
 .\scripts\pre-commit.ps1 -AllowMain

@@ -1,27 +1,27 @@
-# Coding Style
+# 代码风格
 
-This project follows the Google Go Style Guide as the primary Go coding standard.
+本项目以 Google Go Style Guide 作为主要 Go 代码规范。
 
-References:
+参考资料：
 
 - Google Go Style Guide: https://google.github.io/styleguide/go/guide
 - Google Go Style Decisions: https://google.github.io/styleguide/go/decisions
 - Go Code Review Comments: https://go.dev/wiki/CodeReviewComments
 
-## Core Rules
+## 核心规则
 
-- Format all Go code with `gofmt`.
-- Prefer clarity, simplicity, concision, maintainability, and consistency, in that order.
-- Use idiomatic Go names and package structure.
-- Keep interfaces small and close to the code that consumes them.
-- Return errors with useful context; do not silently ignore errors.
-- Avoid `panic` outside unrecoverable CLI startup failures.
+- 所有 Go 代码必须使用 `gofmt` 格式化。
+- 代码优先级依次为：清晰、简单、简洁、可维护、一致。
+- 使用符合 Go 习惯的命名和包结构。
+- 接口要小，并尽量靠近使用方定义。
+- 返回错误时要带有有用上下文，不要静默忽略错误。
+- 除不可恢复的 CLI 启动失败外，避免使用 `panic`。
 
-## Naming
+## 命名
 
-Go identifiers use `MixedCaps` or `mixedCaps`, not `snake_case`.
+Go 标识符使用 `MixedCaps` 或 `mixedCaps`，不要使用 `snake_case`。
 
-Examples:
+示例：
 
 ```go
 type ProviderConfig struct {
@@ -34,16 +34,16 @@ var runID string
 var createdAt time.Time
 ```
 
-Use consistent capitalization for initialisms:
+常见缩写保持统一大写：
 
-- `ID`, not `Id`
-- `URL`, not `Url`
-- `API`, not `Api`
-- `HTTP`, not `Http`
-- `JSON`, not `Json`
-- `SQL`, not `Sql`
+- `ID`，不是 `Id`
+- `URL`，不是 `Url`
+- `API`，不是 `Api`
+- `HTTP`，不是 `Http`
+- `JSON`，不是 `Json`
+- `SQL`，不是 `Sql`
 
-Examples:
+示例：
 
 ```go
 type HTTPClient interface {
@@ -55,22 +55,22 @@ func loadAPIKey(apiKeyEnv string) (string, error) {
 }
 ```
 
-## Project Conventions
+## 项目约定
 
-Different layers use different naming conventions:
+不同层使用不同命名风格：
 
-| Area | Convention | Example |
+| 区域 | 约定 | 示例 |
 | --- | --- | --- |
-| Go identifiers | `mixedCaps` / `MixedCaps` | `taskID`, `ProviderConfig` |
-| Go filenames | `snake_case` | `tool_executor.go` |
-| Package names | short lowercase words | `agent`, `tool`, `provider` |
-| YAML fields | `snake_case` | `api_key_env` |
-| JSON fields | `snake_case` | `run_id` |
-| SQLite columns | `snake_case` | `created_at` |
-| CLI flags | `kebab-case` | `--config-file` |
-| Environment variables | `UPPER_SNAKE_CASE` | `DEEPSEEK_API_KEY` |
+| Go 标识符 | `mixedCaps` / `MixedCaps` | `taskID`, `ProviderConfig` |
+| Go 文件名 | `snake_case` | `tool_executor.go` |
+| 包名 | 短小写单词 | `agent`, `tool`, `provider` |
+| YAML 字段 | `snake_case` | `api_key_env` |
+| JSON 字段 | `snake_case` | `run_id` |
+| SQLite 字段 | `snake_case` | `created_at` |
+| CLI flag | `kebab-case` | `--config-file` |
+| 环境变量 | `UPPER_SNAKE_CASE` | `DEEPSEEK_API_KEY` |
 
-When mapping external fields to Go structs, use Go names internally and tags externally:
+映射外部字段到 Go 结构体时，内部使用 Go 命名，外部用 tag：
 
 ```go
 type ProviderConfig struct {
@@ -79,9 +79,9 @@ type ProviderConfig struct {
 }
 ```
 
-## Errors
+## 错误处理
 
-Handle errors immediately and keep the normal path unindented:
+错误要立刻处理，并保持正常路径少缩进：
 
 ```go
 value, err := loadValue()
@@ -92,15 +92,15 @@ if err != nil {
 return useValue(value)
 ```
 
-Error strings should be lower-case and should not end with punctuation unless required by the message.
+错误字符串使用小写开头，不要以标点结尾，除非消息本身必须包含。
 
 ## Context
 
-- Pass `context.Context` as the first parameter for operations that can block, call models, execute tools, or touch storage.
-- Do not store `context.Context` in structs.
-- Respect cancellation and deadlines.
+- 可能阻塞、调用模型、执行工具或访问存储的操作，第一个参数必须是 `context.Context`。
+- 不要把 `context.Context` 存进结构体。
+- 必须尊重取消和 deadline。
 
-Example:
+示例：
 
 ```go
 func (r *Runner) Run(ctx context.Context, input Input) (Output, error) {
@@ -108,17 +108,17 @@ func (r *Runner) Run(ctx context.Context, input Input) (Output, error) {
 }
 ```
 
-## Comments
+## 注释
 
-- Project documentation and code comments must be written in Chinese.
-- Exported packages, types, functions, methods, and constants should have doc comments when they are part of a public API.
-- Doc comments should be complete sentences and start with the documented identifier when practical.
-- Avoid comments that merely repeat the code.
+- 项目文档和代码注释必须使用中文。
+- 对外导出的包、类型、函数、方法和常量，如果属于公共 API，应写文档注释。
+- 文档注释应尽量是完整句子，并在可读性允许时以被注释的标识符开头。
+- 避免写只重复代码含义的注释。
 
-Example:
+示例：
 
 ```go
-// Runner executes an agent until it returns a final response or fails.
+// Runner 执行一个 agent，直到它返回最终回答或失败。
 type Runner struct {
 	// ...
 }

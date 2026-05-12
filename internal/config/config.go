@@ -7,7 +7,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Config is the project runtime configuration.
+// 表示项目运行配置。
 type Config struct {
 	Version   int                       `yaml:"version"`
 	Runtime   RuntimeConfig             `yaml:"runtime"`
@@ -17,25 +17,25 @@ type Config struct {
 	Workflows map[string]WorkflowConfig `yaml:"workflows"`
 }
 
-// RuntimeConfig contains agent runtime defaults.
+// 保存 agent 运行时默认配置。
 type RuntimeConfig struct {
 	MaxRounds int `yaml:"max_rounds"`
 }
 
-// ProvidersConfig contains model provider settings.
+// 保存模型 provider 配置。
 type ProvidersConfig struct {
 	Default string                    `yaml:"default"`
 	Items   map[string]ProviderConfig `yaml:",inline"`
 }
 
-// ProviderConfig contains one provider's endpoint and model settings.
+// 保存一个 provider 的 endpoint 和模型配置。
 type ProviderConfig struct {
 	BaseURL   string `yaml:"base_url"`
 	Model     string `yaml:"model"`
 	APIKeyEnv string `yaml:"api_key_env"`
 }
 
-// AgentConfig contains one agent's model and tool settings.
+// 保存一个 agent 的模型和工具配置。
 type AgentConfig struct {
 	Provider     string   `yaml:"provider"`
 	SystemPrompt string   `yaml:"system_prompt"`
@@ -43,26 +43,26 @@ type AgentConfig struct {
 	MaxRounds    int      `yaml:"max_rounds"`
 }
 
-// ToolConfig contains tool-specific runtime settings.
+// 保存工具专属运行配置。
 type ToolConfig struct {
 	Roots    []string `yaml:"roots"`
 	MaxBytes int64    `yaml:"max_bytes"`
 }
 
-// WorkflowConfig contains one workflow definition.
+// 保存一个 workflow 定义。
 type WorkflowConfig struct {
 	Coordinator string         `yaml:"coordinator"`
 	Steps       []WorkflowStep `yaml:"steps"`
 }
 
-// WorkflowStep contains one workflow step.
+// 保存一个 workflow step。
 type WorkflowStep struct {
 	Agent  string `yaml:"agent"`
 	Input  string `yaml:"input"`
 	Output string `yaml:"output"`
 }
 
-// Load reads the small project YAML config.
+// 读取项目 YAML 配置。
 func Load(path string) (Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

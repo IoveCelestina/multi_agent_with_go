@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// Load reads environment variables from path without overriding existing values.
+// 从指定文件读取环境变量，并且不覆盖已经存在的值。
 func Load(path string) error {
 	file, err := os.Open(path)
 	if err != nil {

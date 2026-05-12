@@ -11,7 +11,7 @@ import (
 
 var toolNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
-// Tool is a Go-implemented capability that an agent can call.
+// 可供 agent 调用的 Go 实现能力。
 type Tool interface {
 	Name() string
 	Description() string
@@ -19,23 +19,23 @@ type Tool interface {
 	Execute(ctx context.Context, args json.RawMessage) (Result, error)
 }
 
-// Result is the text returned to the model after a tool call.
+// 工具调用后回传给模型的结果。
 type Result struct {
 	Content string
 	IsError bool
 }
 
-// Registry stores all available tools by name.
+// 按名称保存所有可用工具。
 type Registry struct {
 	tools map[string]Tool
 }
 
-// NewRegistry creates an empty tool registry.
+// 创建一个空工具注册表。
 func NewRegistry() *Registry {
 	return &Registry{tools: map[string]Tool{}}
 }
 
-// Register adds a tool to the registry.
+// 把工具加入注册表。
 func (r *Registry) Register(t Tool) error {
 	if t == nil {
 		return fmt.Errorf("register tool: tool is nil")
@@ -62,13 +62,13 @@ func (r *Registry) Register(t Tool) error {
 	return nil
 }
 
-// Get returns a registered tool by name.
+// 按名称返回已注册工具。
 func (r *Registry) Get(name string) (Tool, bool) {
 	t, ok := r.tools[name]
 	return t, ok
 }
 
-// Specs returns provider tool specs for the named tools.
+// 返回指定工具名对应的 provider 工具声明。
 func (r *Registry) Specs(names []string) ([]provider.ToolSpec, error) {
 	specs := make([]provider.ToolSpec, 0, len(names))
 	for _, name := range names {

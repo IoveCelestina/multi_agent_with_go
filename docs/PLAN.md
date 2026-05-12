@@ -1,4 +1,4 @@
-# Multi Agent Go Project Plan
+# Multi-Agent Go 项目计划
 
 目标：构建一个 Go 版本的 multi-agent 项目。这个项目优先服务学习：先跑通最小闭环，再逐步深入 provider、tool calling、coordinator、持久化、resume、并发和 reviewer。
 

@@ -1,4 +1,4 @@
-# Phase Journal
+# 阶段笔记
 
 每个阶段完成后在这里写一篇短笔记，文件名使用：
 
@@ -9,7 +9,7 @@ phase-N.md
 建议结构：
 
 ```markdown
-# Phase N
+# 阶段 N
 
 ## 最难的决定
 
