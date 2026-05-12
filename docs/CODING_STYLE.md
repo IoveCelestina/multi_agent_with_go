@@ -110,6 +110,7 @@ func (r *Runner) Run(ctx context.Context, input Input) (Output, error) {
 
 ## Comments
 
+- Project documentation and code comments must be written in Chinese.
 - Exported packages, types, functions, methods, and constants should have doc comments when they are part of a public API.
 - Doc comments should be complete sentences and start with the documented identifier when practical.
 - Avoid comments that merely repeat the code.
