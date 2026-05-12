@@ -20,6 +20,7 @@ Usage:
 Checks:
   - current branch follows docs/GIT_WORKFLOW.md
   - staged secret-like files are blocked
+  - staged diff is scanned for possible API keys and tokens
   - staged Go filenames use snake_case
   - Go files are formatted with gofmt
   - go vet ./...
@@ -62,6 +63,10 @@ function Test-BlockedPath {
     $normalized = $Path -replace "\\", "/"
     $leaf = Split-Path -Leaf $normalized
 
+    if ($leaf -eq ".env.example") {
+        return $false
+    }
+
     if ($leaf -eq ".env" -or $leaf -like ".env.*") {
         return $true
     }
@@ -82,6 +87,20 @@ function Test-GoFileName {
 
     $leaf = Split-Path -Leaf $Path
     return $leaf -match "^[a-z0-9]+(_[a-z0-9]+)*(_test)?\.go$"
+}
+
+function Test-SecretLine {
+    param([string]$Line)
+
+    if ($Line -match "(?i)(api[_-]?key|secret|token)\s*[:=]\s*[""']?(sk-[A-Za-z0-9]{20,}|[A-Za-z0-9][A-Za-z0-9_\-]{31,})") {
+        return $true
+    }
+
+    if ($Line -match "(?i)\bsk-[A-Za-z0-9]{20,}\b") {
+        return $true
+    }
+
+    return $false
 }
 
 if ($Help) {
@@ -118,6 +137,28 @@ foreach ($file in $stagedFiles) {
 
     if ($file -like "*.go" -and -not (Test-GoFileName $file)) {
         Fail "Go filename '$file' must use snake_case, for example tool_executor.go"
+    }
+}
+
+Write-Step "scanning staged diff for secrets"
+$stagedDiff = @(git diff --cached --unified=0 --diff-filter=ACM)
+if ($LASTEXITCODE -ne 0) {
+    Fail "failed to read staged diff"
+}
+
+$currentFile = ""
+foreach ($line in $stagedDiff) {
+    if ($line -like "+++ b/*") {
+        $currentFile = $line.Substring(6)
+        continue
+    }
+    if (-not $line.StartsWith("+") -or $line.StartsWith("+++") -or $currentFile -eq ".env.example") {
+        continue
+    }
+
+    $added = $line.Substring(1)
+    if (Test-SecretLine $added) {
+        Fail "possible secret in staged file '$currentFile': $added"
     }
 }
 

@@ -1,0 +1,353 @@
+package deepseek
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/ht/multi_agent/internal/config"
+	"github.com/ht/multi_agent/internal/provider"
+)
+
+const defaultTimeout = 120 * time.Second
+
+// Provider implements DeepSeek's OpenAI-compatible chat completions API.
+type Provider struct {
+	name       string
+	baseURL    string
+	model      string
+	apiKey     string
+	httpClient *http.Client
+}
+
+// New creates a DeepSeek provider.
+func New(cfg config.ProviderConfig, client *http.Client) (*Provider, error) {
+	if cfg.BaseURL == "" {
+		return nil, fmt.Errorf("create deepseek provider: base_url is required")
+	}
+	if cfg.Model == "" {
+		return nil, fmt.Errorf("create deepseek provider: model is required")
+	}
+	if cfg.APIKeyEnv == "" {
+		return nil, fmt.Errorf("create deepseek provider: api_key_env is required")
+	}
+
+	apiKey := os.Getenv(cfg.APIKeyEnv)
+	if apiKey == "" {
+		return nil, fmt.Errorf("create deepseek provider: environment variable %s is not set", cfg.APIKeyEnv)
+	}
+	if client == nil {
+		client = &http.Client{Timeout: defaultTimeout}
+	}
+
+	return &Provider{
+		name:       "deepseek",
+		baseURL:    strings.TrimRight(cfg.BaseURL, "/"),
+		model:      cfg.Model,
+		apiKey:     apiKey,
+		httpClient: client,
+	}, nil
+}
+
+// Name returns the provider name.
+func (p *Provider) Name() string {
+	return p.name
+}
+
+// Stream starts a streaming chat completion request.
+func (p *Provider) Stream(ctx context.Context, req provider.ChatRequest) (<-chan provider.Event, error) {
+	body, err := p.buildRequestBody(req)
+	if err != nil {
+		return nil, err
+	}
+
+	endpoint, err := chatCompletionsURL(p.baseURL)
+	if err != nil {
+		return nil, err
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("create deepseek request: %w", err)
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+p.apiKey)
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Accept", "text/event-stream")
+
+	resp, err := p.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("start deepseek stream: %w", err)
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		defer resp.Body.Close()
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4*1024))
+		return nil, fmt.Errorf("start deepseek stream: status %d: %s", resp.StatusCode, strings.TrimSpace(string(msg)))
+	}
+
+	events := make(chan provider.Event)
+	go func() {
+		defer close(events)
+		defer resp.Body.Close()
+		p.readStream(ctx, resp.Body, events)
+	}()
+
+	return events, nil
+}
+
+func (p *Provider) buildRequestBody(req provider.ChatRequest) ([]byte, error) {
+	wire := chatRequest{
+		Model:    p.model,
+		Messages: make([]message, 0, len(req.Messages)),
+		Stream:   true,
+	}
+	if req.Temperature != 0 {
+		wire.Temperature = &req.Temperature
+	}
+	if req.MaxTokens > 0 {
+		wire.MaxTokens = req.MaxTokens
+	}
+	if len(req.Tools) > 0 {
+		wire.Tools = make([]toolSpec, 0, len(req.Tools))
+		for _, t := range req.Tools {
+			wire.Tools = append(wire.Tools, toolSpec{
+				Type: "function",
+				Function: functionSpec{
+					Name:        t.Name,
+					Description: t.Description,
+					Parameters:  t.JSONSchema,
+				},
+			})
+		}
+	}
+
+	for _, msg := range req.Messages {
+		wire.Messages = append(wire.Messages, convertMessage(msg))
+	}
+
+	body, err := json.Marshal(wire)
+	if err != nil {
+		return nil, fmt.Errorf("marshal deepseek request: %w", err)
+	}
+
+	return body, nil
+}
+
+func (p *Provider) readStream(ctx context.Context, body io.Reader, events chan<- provider.Event) {
+	scanner := bufio.NewScanner(body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+	var assembler toolCallAssembler
+	for scanner.Scan() {
+		if err := ctx.Err(); err != nil {
+			sendEvent(ctx, events, provider.Event{Kind: provider.EventError, Err: err})
+			return
+		}
+
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, ":") {
+			continue
+		}
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+
+		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if data == "[DONE]" {
+			return
+		}
+
+		var chunk chatChunk
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			sendEvent(ctx, events, provider.Event{Kind: provider.EventError, Err: fmt.Errorf("decode deepseek stream: %w", err)})
+			return
+		}
+
+		for _, choice := range chunk.Choices {
+			if choice.Delta.Content != "" {
+				if !sendEvent(ctx, events, provider.Event{Kind: provider.EventText, TextDelta: choice.Delta.Content}) {
+					return
+				}
+			}
+
+			for _, delta := range choice.Delta.ToolCalls {
+				if call, ok := assembler.add(delta); ok {
+					if !sendEvent(ctx, events, provider.Event{Kind: provider.EventToolCall, ToolCall: &call}) {
+						return
+					}
+				}
+			}
+
+			if choice.FinishReason != "" {
+				for _, call := range assembler.flush() {
+					if !sendEvent(ctx, events, provider.Event{Kind: provider.EventToolCall, ToolCall: &call}) {
+						return
+					}
+				}
+				if !sendEvent(ctx, events, provider.Event{
+					Kind:         provider.EventDone,
+					FinishReason: provider.FinishReason(choice.FinishReason),
+				}) {
+					return
+				}
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		sendEvent(ctx, events, provider.Event{Kind: provider.EventError, Err: fmt.Errorf("read deepseek stream: %w", err)})
+	}
+}
+
+func sendEvent(ctx context.Context, events chan<- provider.Event, event provider.Event) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	case events <- event:
+		return true
+	}
+}
+
+func chatCompletionsURL(baseURL string) (string, error) {
+	parsed, err := url.Parse(baseURL)
+	if err != nil {
+		return "", fmt.Errorf("parse deepseek base_url: %w", err)
+	}
+	parsed.Path = strings.TrimRight(parsed.Path, "/") + "/chat/completions"
+	return parsed.String(), nil
+}
+
+func convertMessage(msg provider.Message) message {
+	converted := message{
+		Role:       string(msg.Role),
+		Content:    msg.Content,
+		ToolCallID: msg.ToolCallID,
+		Name:       msg.Name,
+	}
+	if len(msg.ToolCalls) > 0 {
+		converted.ToolCalls = make([]toolCall, 0, len(msg.ToolCalls))
+		for _, call := range msg.ToolCalls {
+			converted.ToolCalls = append(converted.ToolCalls, toolCall{
+				ID:   call.ID,
+				Type: "function",
+				Function: functionCall{
+					Name:      call.Name,
+					Arguments: call.Arguments,
+				},
+			})
+		}
+	}
+
+	return converted
+}
+
+type chatRequest struct {
+	Model       string     `json:"model"`
+	Messages    []message  `json:"messages"`
+	Tools       []toolSpec `json:"tools,omitempty"`
+	Stream      bool       `json:"stream"`
+	Temperature *float64   `json:"temperature,omitempty"`
+	MaxTokens   int        `json:"max_tokens,omitempty"`
+}
+
+type message struct {
+	Role       string     `json:"role"`
+	Content    string     `json:"content,omitempty"`
+	ToolCalls  []toolCall `json:"tool_calls,omitempty"`
+	ToolCallID string     `json:"tool_call_id,omitempty"`
+	Name       string     `json:"name,omitempty"`
+}
+
+type toolSpec struct {
+	Type     string       `json:"type"`
+	Function functionSpec `json:"function"`
+}
+
+type functionSpec struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	Parameters  json.RawMessage `json:"parameters,omitempty"`
+}
+
+type toolCall struct {
+	ID       string       `json:"id,omitempty"`
+	Type     string       `json:"type,omitempty"`
+	Function functionCall `json:"function"`
+}
+
+type functionCall struct {
+	Name      string `json:"name,omitempty"`
+	Arguments string `json:"arguments,omitempty"`
+}
+
+type chatChunk struct {
+	Choices []choice `json:"choices"`
+}
+
+type choice struct {
+	Delta        delta  `json:"delta"`
+	FinishReason string `json:"finish_reason"`
+}
+
+type delta struct {
+	Content   string          `json:"content"`
+	ToolCalls []toolCallDelta `json:"tool_calls"`
+}
+
+type toolCallDelta struct {
+	Index    int          `json:"index"`
+	ID       string       `json:"id"`
+	Type     string       `json:"type"`
+	Function functionCall `json:"function"`
+}
+
+type toolCallAssembler struct {
+	calls map[int]*provider.ToolCall
+}
+
+func (a *toolCallAssembler) add(delta toolCallDelta) (provider.ToolCall, bool) {
+	if a.calls == nil {
+		a.calls = map[int]*provider.ToolCall{}
+	}
+
+	call, ok := a.calls[delta.Index]
+	if !ok {
+		call = &provider.ToolCall{}
+		a.calls[delta.Index] = call
+	}
+	if delta.ID != "" {
+		call.ID = delta.ID
+	}
+	if delta.Function.Name != "" {
+		call.Name += delta.Function.Name
+	}
+	if delta.Function.Arguments != "" {
+		call.Arguments += delta.Function.Arguments
+	}
+
+	return provider.ToolCall{}, false
+}
+
+func (a *toolCallAssembler) flush() []provider.ToolCall {
+	if len(a.calls) == 0 {
+		return nil
+	}
+
+	out := make([]provider.ToolCall, 0, len(a.calls))
+	for i := 0; i < len(a.calls); i++ {
+		call, ok := a.calls[i]
+		if !ok {
+			continue
+		}
+		out = append(out, *call)
+	}
+	a.calls = nil
+
+	return out
+}

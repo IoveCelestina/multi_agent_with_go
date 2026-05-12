@@ -21,26 +21,26 @@
 
 ## 当前阶段
 
-### 阶段 0：骨架
+### 阶段 1：Provider + DeepSeek streaming
 
 范围：
 
-- 初始化 Go module
-- 创建 `agentctl` CLI 入口
-- 创建版本命令
-- 添加一份 agents/workflow YAML 示例
-- 保持零第三方依赖，避免过早引入框架
+- 读取 `configs/agents.yaml` 里的 provider 配置
+- 实现 DeepSeek OpenAI-compatible `/chat/completions` streaming provider
+- 新增 `agentctl chat --provider deepseek` 单轮流式输出
+- 支持 `Ctrl+C` 取消请求
+- 保持 provider 接口可复用，后续 Kimi 接入不改 CLI 主流程
 
 验收：
 
 ```powershell
-go run ./cmd/agentctl version
+go run ./cmd/agentctl chat --provider deepseek "hello"
 ```
 
-预期输出：
+需要先设置：
 
-```text
-agentctl 0.1.0-dev
+```powershell
+$env:DEEPSEEK_API_KEY="<your api key>"
 ```
 
 ## 近期实现原则
