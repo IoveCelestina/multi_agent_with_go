@@ -1,5 +1,8 @@
 version: 1
 
+runtime:
+  max_rounds: 10
+
 providers:
   default: deepseek
   deepseek:
@@ -23,6 +26,12 @@ agents:
     system_prompt: |
       You are a practical writing agent. Turn research notes into a clear final answer.
     tools: []
+
+tools:
+  read_file:
+    roots:
+      - ./
+    max_bytes: 65536
 
 workflows:
   research_writer:
