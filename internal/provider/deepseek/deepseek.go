@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -17,7 +18,7 @@ import (
 	"github.com/ht/multi_agent/internal/provider"
 )
 
-const defaultTimeout = 120 * time.Second
+const defaultResponseHeaderTimeout = 30 * time.Second
 
 // Provider implements DeepSeek's OpenAI-compatible chat completions API.
 type Provider struct {
@@ -45,7 +46,7 @@ func New(cfg config.ProviderConfig, client *http.Client) (*Provider, error) {
 		return nil, fmt.Errorf("create deepseek provider: environment variable %s is not set", cfg.APIKeyEnv)
 	}
 	if client == nil {
-		client = &http.Client{Timeout: defaultTimeout}
+		client = defaultHTTPClient()
 	}
 
 	return &Provider{
@@ -108,8 +109,8 @@ func (p *Provider) buildRequestBody(req provider.ChatRequest) ([]byte, error) {
 		Messages: make([]message, 0, len(req.Messages)),
 		Stream:   true,
 	}
-	if req.Temperature != 0 {
-		wire.Temperature = &req.Temperature
+	if req.Temperature != nil {
+		wire.Temperature = req.Temperature
 	}
 	if req.MaxTokens > 0 {
 		wire.MaxTokens = req.MaxTokens
@@ -145,9 +146,28 @@ func (p *Provider) readStream(ctx context.Context, body io.Reader, events chan<-
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
 	var assembler toolCallAssembler
+	doneSent := false
+	sendDone := func(reason provider.FinishReason) bool {
+		if doneSent {
+			return true
+		}
+		for _, call := range assembler.flush() {
+			if !sendEvent(ctx, events, provider.Event{Kind: provider.EventToolCall, ToolCall: &call}) {
+				return false
+			}
+		}
+		if !sendEvent(ctx, events, provider.Event{
+			Kind:         provider.EventDone,
+			FinishReason: reason,
+		}) {
+			return false
+		}
+		doneSent = true
+		return true
+	}
+
 	for scanner.Scan() {
-		if err := ctx.Err(); err != nil {
-			sendEvent(ctx, events, provider.Event{Kind: provider.EventError, Err: err})
+		if ctx.Err() != nil {
 			return
 		}
 
@@ -161,6 +181,9 @@ func (p *Provider) readStream(ctx context.Context, body io.Reader, events chan<-
 
 		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 		if data == "[DONE]" {
+			if !doneSent {
+				_ = sendDone(provider.FinishStop)
+			}
 			return
 		}
 
@@ -178,29 +201,21 @@ func (p *Provider) readStream(ctx context.Context, body io.Reader, events chan<-
 			}
 
 			for _, delta := range choice.Delta.ToolCalls {
-				if call, ok := assembler.add(delta); ok {
-					if !sendEvent(ctx, events, provider.Event{Kind: provider.EventToolCall, ToolCall: &call}) {
-						return
-					}
-				}
+				assembler.add(delta)
 			}
 
 			if choice.FinishReason != "" {
-				for _, call := range assembler.flush() {
-					if !sendEvent(ctx, events, provider.Event{Kind: provider.EventToolCall, ToolCall: &call}) {
-						return
-					}
-				}
-				if !sendEvent(ctx, events, provider.Event{
-					Kind:         provider.EventDone,
-					FinishReason: provider.FinishReason(choice.FinishReason),
-				}) {
+				if !sendDone(provider.FinishReason(choice.FinishReason)) {
 					return
 				}
+				break
 			}
 		}
 	}
 	if err := scanner.Err(); err != nil {
+		if ctx.Err() != nil {
+			return
+		}
 		sendEvent(ctx, events, provider.Event{Kind: provider.EventError, Err: fmt.Errorf("read deepseek stream: %w", err)})
 	}
 }
@@ -245,6 +260,19 @@ func convertMessage(msg provider.Message) message {
 	}
 
 	return converted
+}
+
+func defaultHTTPClient() *http.Client {
+	transport, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return &http.Client{
+			Transport: &http.Transport{ResponseHeaderTimeout: defaultResponseHeaderTimeout},
+		}
+	}
+
+	cloned := transport.Clone()
+	cloned.ResponseHeaderTimeout = defaultResponseHeaderTimeout
+	return &http.Client{Transport: cloned}
 }
 
 type chatRequest struct {
@@ -311,7 +339,7 @@ type toolCallAssembler struct {
 	calls map[int]*provider.ToolCall
 }
 
-func (a *toolCallAssembler) add(delta toolCallDelta) (provider.ToolCall, bool) {
+func (a *toolCallAssembler) add(delta toolCallDelta) {
 	if a.calls == nil {
 		a.calls = map[int]*provider.ToolCall{}
 	}
@@ -330,8 +358,6 @@ func (a *toolCallAssembler) add(delta toolCallDelta) (provider.ToolCall, bool) {
 	if delta.Function.Arguments != "" {
 		call.Arguments += delta.Function.Arguments
 	}
-
-	return provider.ToolCall{}, false
 }
 
 func (a *toolCallAssembler) flush() []provider.ToolCall {
@@ -339,13 +365,15 @@ func (a *toolCallAssembler) flush() []provider.ToolCall {
 		return nil
 	}
 
-	out := make([]provider.ToolCall, 0, len(a.calls))
-	for i := 0; i < len(a.calls); i++ {
-		call, ok := a.calls[i]
-		if !ok {
-			continue
-		}
-		out = append(out, *call)
+	indices := make([]int, 0, len(a.calls))
+	for i := range a.calls {
+		indices = append(indices, i)
+	}
+	sort.Ints(indices)
+
+	out := make([]provider.ToolCall, 0, len(indices))
+	for _, i := range indices {
+		out = append(out, *a.calls[i])
 	}
 	a.calls = nil
 

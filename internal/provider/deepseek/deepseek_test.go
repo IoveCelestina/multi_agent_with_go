@@ -51,11 +51,13 @@ func TestStreamEmitsTextAndDone(t *testing.T) {
 
 	var text string
 	var finish provider.FinishReason
+	var doneCount int
 	for event := range events {
 		switch event.Kind {
 		case provider.EventText:
 			text += event.TextDelta
 		case provider.EventDone:
+			doneCount++
 			finish = event.FinishReason
 		case provider.EventError:
 			t.Fatalf("EventError = %v", event.Err)
@@ -67,6 +69,9 @@ func TestStreamEmitsTextAndDone(t *testing.T) {
 	}
 	if finish != provider.FinishStop {
 		t.Fatalf("finish = %q, want %q", finish, provider.FinishStop)
+	}
+	if doneCount != 1 {
+		t.Fatalf("doneCount = %d, want 1", doneCount)
 	}
 }
 
@@ -116,6 +121,166 @@ func TestStreamAssemblesToolCall(t *testing.T) {
 	}
 	if finish != provider.FinishToolCalls {
 		t.Fatalf("finish = %q, want %q", finish, provider.FinishToolCalls)
+	}
+}
+
+func TestStreamEmitsDoneOnDoneSentinelWithoutFinishReason(t *testing.T) {
+	t.Setenv("DEEPSEEK_TEST_KEY", "test-key")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	prov := newTestProvider(t, server.URL)
+	events, err := prov.Stream(context.Background(), provider.ChatRequest{
+		Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Stream() error = %v", err)
+	}
+
+	var finish provider.FinishReason
+	var doneCount int
+	for event := range events {
+		switch event.Kind {
+		case provider.EventDone:
+			doneCount++
+			finish = event.FinishReason
+		case provider.EventError:
+			t.Fatalf("EventError = %v", event.Err)
+		}
+	}
+
+	if doneCount != 1 {
+		t.Fatalf("doneCount = %d, want 1", doneCount)
+	}
+	if finish != provider.FinishStop {
+		t.Fatalf("finish = %q, want %q", finish, provider.FinishStop)
+	}
+}
+
+func TestStreamEmitsOnlyOneDoneForMultipleFinishedChoices(t *testing.T) {
+	t.Setenv("DEEPSEEK_TEST_KEY", "test-key")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"one\"},\"finish_reason\":\"stop\"},{\"delta\":{\"content\":\"two\"},\"finish_reason\":\"stop\"}]}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	prov := newTestProvider(t, server.URL)
+	events, err := prov.Stream(context.Background(), provider.ChatRequest{
+		Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Stream() error = %v", err)
+	}
+
+	var doneCount int
+	for event := range events {
+		switch event.Kind {
+		case provider.EventDone:
+			doneCount++
+		case provider.EventError:
+			t.Fatalf("EventError = %v", event.Err)
+		}
+	}
+
+	if doneCount != 1 {
+		t.Fatalf("doneCount = %d, want 1", doneCount)
+	}
+}
+
+func TestStreamFlushesNonContiguousToolCallIndexes(t *testing.T) {
+	t.Setenv("DEEPSEEK_TEST_KEY", "test-key")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":5,\"id\":\"call_5\",\"type\":\"function\",\"function\":{\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"b\\\"}\"}},{\"index\":0,\"id\":\"call_0\",\"type\":\"function\",\"function\":{\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"a\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	prov := newTestProvider(t, server.URL)
+	events, err := prov.Stream(context.Background(), provider.ChatRequest{
+		Messages: []provider.Message{{Role: provider.RoleUser, Content: "read"}},
+	})
+	if err != nil {
+		t.Fatalf("Stream() error = %v", err)
+	}
+
+	var calls []provider.ToolCall
+	for event := range events {
+		switch event.Kind {
+		case provider.EventToolCall:
+			calls = append(calls, *event.ToolCall)
+		case provider.EventError:
+			t.Fatalf("EventError = %v", event.Err)
+		}
+	}
+
+	if len(calls) != 2 {
+		t.Fatalf("len(calls) = %d, want 2", len(calls))
+	}
+	if calls[0].ID != "call_0" || calls[1].ID != "call_5" {
+		t.Fatalf("call IDs = %q, %q; want call_0, call_5", calls[0].ID, calls[1].ID)
+	}
+}
+
+func TestStreamSendsExplicitZeroTemperature(t *testing.T) {
+	t.Setenv("DEEPSEEK_TEST_KEY", "test-key")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req chatRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("Decode request error = %v", err)
+		}
+		if req.Temperature == nil {
+			t.Fatal("temperature was omitted")
+		}
+		if *req.Temperature != 0 {
+			t.Fatalf("temperature = %v, want 0", *req.Temperature)
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	prov := newTestProvider(t, server.URL)
+	temperature := 0.0
+	events, err := prov.Stream(context.Background(), provider.ChatRequest{
+		Messages:    []provider.Message{{Role: provider.RoleUser, Content: "hi"}},
+		Temperature: &temperature,
+	})
+	if err != nil {
+		t.Fatalf("Stream() error = %v", err)
+	}
+	for event := range events {
+		if event.Kind == provider.EventError {
+			t.Fatalf("EventError = %v", event.Err)
+		}
+	}
+}
+
+func TestNewDefaultClientDoesNotSetWholeRequestTimeout(t *testing.T) {
+	t.Setenv("DEEPSEEK_TEST_KEY", "test-key")
+
+	prov, err := New(config.ProviderConfig{
+		BaseURL:   "https://api.deepseek.com",
+		Model:     "deepseek-chat",
+		APIKeyEnv: "DEEPSEEK_TEST_KEY",
+	}, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	if prov.httpClient.Timeout != 0 {
+		t.Fatalf("http client timeout = %v, want 0", prov.httpClient.Timeout)
 	}
 }
 

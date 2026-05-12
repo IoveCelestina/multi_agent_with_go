@@ -60,7 +60,7 @@ func runChat(args []string) error {
 
 	configPath := flags.String("config", "configs/agents.yaml", "path to config file")
 	providerName := flags.String("provider", "", "provider name")
-	temperature := flags.Float64("temperature", 0, "sampling temperature")
+	temperature := flags.Float64("temperature", -1, "sampling temperature")
 	maxTokens := flags.Int("max-tokens", 0, "maximum output tokens")
 
 	if err := flags.Parse(args); err != nil {
@@ -93,11 +93,16 @@ func runChat(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
+	var requestTemperature *float64
+	if *temperature >= 0 {
+		requestTemperature = temperature
+	}
+
 	events, err := prov.Stream(ctx, provider.ChatRequest{
 		Messages: []provider.Message{
 			{Role: provider.RoleUser, Content: prompt},
 		},
-		Temperature: *temperature,
+		Temperature: requestTemperature,
 		MaxTokens:   *maxTokens,
 	})
 	if err != nil {

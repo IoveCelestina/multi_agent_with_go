@@ -8,6 +8,9 @@ import (
 	"strings"
 )
 
+// This phase-1 loader intentionally parses only version, runtime, and providers.
+// Agents, tools, and workflows stay in the YAML file but are parsed in later phases.
+
 // Config is the project runtime configuration.
 type Config struct {
 	Version   int

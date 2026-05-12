@@ -42,7 +42,7 @@ type ToolSpec struct {
 type ChatRequest struct {
 	Messages    []Message
 	Tools       []ToolSpec
-	Temperature float64
+	Temperature *float64
 	MaxTokens   int
 }
 

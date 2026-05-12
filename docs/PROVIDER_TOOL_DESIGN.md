@@ -30,8 +30,14 @@ type Provider interface {
   HTTP request creation failure.
 - Send `EventError` after the stream has started, such as SSE decode failure,
   provider-side stream errors, or interrupted responses.
+- When `ctx` is canceled by the caller, Provider may close the channel without
+  sending `EventError`; caller-initiated cancellation is already visible through
+  the caller's context.
 - Provider owns and closes the event channel.
 - Provider must stop its goroutine when `ctx` is canceled.
+- Provider should send exactly one `EventDone` for a completed response. If an
+  upstream stream ends with `[DONE]` before an explicit finish reason, Provider
+  should send a best-effort `EventDone` with `FinishStop`.
 
 Tool calls are assembled inside provider implementations. AgentRunner receives a
 complete `ToolCall` with raw JSON arguments, not streaming argument deltas.
