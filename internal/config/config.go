@@ -1,140 +1,82 @@
 package config
 
 import (
-	"bufio"
 	"fmt"
 	"os"
-	"strconv"
-	"strings"
-)
 
-// This phase-1 loader intentionally parses only version, runtime, and providers.
-// Agents, tools, and workflows stay in the YAML file but are parsed in later phases.
+	"gopkg.in/yaml.v3"
+)
 
 // Config is the project runtime configuration.
 type Config struct {
-	Version   int
-	Runtime   RuntimeConfig
-	Providers ProvidersConfig
+	Version   int                       `yaml:"version"`
+	Runtime   RuntimeConfig             `yaml:"runtime"`
+	Providers ProvidersConfig           `yaml:"providers"`
+	Agents    map[string]AgentConfig    `yaml:"agents"`
+	Tools     map[string]ToolConfig     `yaml:"tools"`
+	Workflows map[string]WorkflowConfig `yaml:"workflows"`
 }
 
 // RuntimeConfig contains agent runtime defaults.
 type RuntimeConfig struct {
-	MaxRounds int
+	MaxRounds int `yaml:"max_rounds"`
 }
 
 // ProvidersConfig contains model provider settings.
 type ProvidersConfig struct {
-	Default string
-	Items   map[string]ProviderConfig
+	Default string                    `yaml:"default"`
+	Items   map[string]ProviderConfig `yaml:",inline"`
 }
 
 // ProviderConfig contains one provider's endpoint and model settings.
 type ProviderConfig struct {
-	BaseURL   string
-	Model     string
-	APIKeyEnv string
+	BaseURL   string `yaml:"base_url"`
+	Model     string `yaml:"model"`
+	APIKeyEnv string `yaml:"api_key_env"`
+}
+
+// AgentConfig contains one agent's model and tool settings.
+type AgentConfig struct {
+	Provider     string   `yaml:"provider"`
+	SystemPrompt string   `yaml:"system_prompt"`
+	Tools        []string `yaml:"tools"`
+	MaxRounds    int      `yaml:"max_rounds"`
+}
+
+// ToolConfig contains tool-specific runtime settings.
+type ToolConfig struct {
+	Roots    []string `yaml:"roots"`
+	MaxBytes int64    `yaml:"max_bytes"`
+}
+
+// WorkflowConfig contains one workflow definition.
+type WorkflowConfig struct {
+	Coordinator string         `yaml:"coordinator"`
+	Steps       []WorkflowStep `yaml:"steps"`
+}
+
+// WorkflowStep contains one workflow step.
+type WorkflowStep struct {
+	Agent  string `yaml:"agent"`
+	Input  string `yaml:"input"`
+	Output string `yaml:"output"`
 }
 
 // Load reads the small project YAML config.
 func Load(path string) (Config, error) {
-	file, err := os.Open(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return Config{}, fmt.Errorf("open config: %w", err)
 	}
-	defer file.Close()
 
-	cfg := Config{
-		Runtime: RuntimeConfig{MaxRounds: 10},
-		Providers: ProvidersConfig{
-			Items: map[string]ProviderConfig{},
-		},
+	var raw rawConfig
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return Config{}, fmt.Errorf("parse config: %w", err)
 	}
 
-	var section string
-	var currentProvider string
-
-	scanner := bufio.NewScanner(file)
-	lineNumber := 0
-	for scanner.Scan() {
-		lineNumber++
-		raw := strings.TrimRight(scanner.Text(), " \t")
-		line := strings.TrimSpace(raw)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-
-		indent := countLeadingSpaces(raw)
-		if !strings.Contains(line, ":") && indent > 0 {
-			continue
-		}
-
-		key, value, ok := splitYAMLScalar(line)
-		if !ok {
-			return Config{}, fmt.Errorf("parse config line %d: expected key: value", lineNumber)
-		}
-
-		switch indent {
-		case 0:
-			currentProvider = ""
-			if value == "" {
-				section = key
-				continue
-			}
-
-			section = ""
-			switch key {
-			case "version":
-				version, err := strconv.Atoi(value)
-				if err != nil {
-					return Config{}, fmt.Errorf("parse config line %d: version must be an integer", lineNumber)
-				}
-				cfg.Version = version
-			default:
-				continue
-			}
-		case 2:
-			switch section {
-			case "runtime":
-				if key == "max_rounds" {
-					maxRounds, err := strconv.Atoi(value)
-					if err != nil {
-						return Config{}, fmt.Errorf("parse config line %d: max_rounds must be an integer", lineNumber)
-					}
-					cfg.Runtime.MaxRounds = maxRounds
-				}
-			case "providers":
-				if key == "default" {
-					cfg.Providers.Default = value
-					currentProvider = ""
-				} else {
-					currentProvider = key
-					if _, ok := cfg.Providers.Items[currentProvider]; !ok {
-						cfg.Providers.Items[currentProvider] = ProviderConfig{}
-					}
-				}
-			}
-		case 4:
-			if section != "providers" || currentProvider == "" {
-				continue
-			}
-
-			provider := cfg.Providers.Items[currentProvider]
-			switch key {
-			case "base_url":
-				provider.BaseURL = value
-			case "model":
-				provider.Model = value
-			case "api_key_env":
-				provider.APIKeyEnv = value
-			}
-			cfg.Providers.Items[currentProvider] = provider
-		default:
-			continue
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return Config{}, fmt.Errorf("read config: %w", err)
+	cfg := raw.toConfig()
+	if cfg.Providers.Items == nil {
+		cfg.Providers.Items = map[string]ProviderConfig{}
 	}
 
 	if cfg.Version == 0 {
@@ -164,29 +106,31 @@ func Load(path string) (Config, error) {
 	return cfg, nil
 }
 
-func countLeadingSpaces(s string) int {
-	count := 0
-	for _, r := range s {
-		if r != ' ' {
-			break
-		}
-		count++
-	}
-
-	return count
+type rawConfig struct {
+	Version  int                       `yaml:"version"`
+	Runtime  rawRuntimeConfig          `yaml:"runtime"`
+	Provider ProvidersConfig           `yaml:"providers"`
+	Agents   map[string]AgentConfig    `yaml:"agents"`
+	Tools    map[string]ToolConfig     `yaml:"tools"`
+	Workflow map[string]WorkflowConfig `yaml:"workflows"`
 }
 
-func splitYAMLScalar(line string) (string, string, bool) {
-	key, value, ok := strings.Cut(line, ":")
-	if !ok {
-		return "", "", false
+type rawRuntimeConfig struct {
+	MaxRounds *int `yaml:"max_rounds"`
+}
+
+func (r rawConfig) toConfig() Config {
+	maxRounds := 10
+	if r.Runtime.MaxRounds != nil {
+		maxRounds = *r.Runtime.MaxRounds
 	}
 
-	key = strings.TrimSpace(key)
-	value = strings.TrimSpace(value)
-	if key == "" {
-		return "", "", false
+	return Config{
+		Version:   r.Version,
+		Runtime:   RuntimeConfig{MaxRounds: maxRounds},
+		Providers: r.Provider,
+		Agents:    r.Agents,
+		Tools:     r.Tools,
+		Workflows: r.Workflow,
 	}
-
-	return key, strings.Trim(value, `"`), true
 }

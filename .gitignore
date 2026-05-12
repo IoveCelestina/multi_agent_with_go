@@ -9,4 +9,6 @@ bin/
 dist/
 coverage.out
 .gocache/
+.gomodcache/
+.gopath/
 **/.testtmp/

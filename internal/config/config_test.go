@@ -32,6 +32,36 @@ func TestLoadReadsProvidersFromProjectConfig(t *testing.T) {
 	if deepseek.APIKeyEnv != "DEEPSEEK_API_KEY" {
 		t.Fatalf("DeepSeek APIKeyEnv = %q", deepseek.APIKeyEnv)
 	}
+
+	researcher := cfg.Agents["researcher"]
+	if researcher.Provider != "deepseek" {
+		t.Fatalf("Researcher Provider = %q, want deepseek", researcher.Provider)
+	}
+	if researcher.SystemPrompt == "" {
+		t.Fatal("Researcher SystemPrompt is empty")
+	}
+	if len(researcher.Tools) != 1 || researcher.Tools[0] != "read_file" {
+		t.Fatalf("Researcher Tools = %#v, want [read_file]", researcher.Tools)
+	}
+
+	readFile := cfg.Tools["read_file"]
+	if len(readFile.Roots) != 1 || readFile.Roots[0] != "./" {
+		t.Fatalf("read_file roots = %#v, want [./]", readFile.Roots)
+	}
+	if readFile.MaxBytes != 65536 {
+		t.Fatalf("read_file max_bytes = %d, want 65536", readFile.MaxBytes)
+	}
+
+	workflow := cfg.Workflows["research_writer"]
+	if workflow.Coordinator != "sync" {
+		t.Fatalf("workflow coordinator = %q, want sync", workflow.Coordinator)
+	}
+	if len(workflow.Steps) != 2 {
+		t.Fatalf("workflow steps = %d, want 2", len(workflow.Steps))
+	}
+	if workflow.Steps[1].Input != "research_notes" {
+		t.Fatalf("second step input = %q, want research_notes", workflow.Steps[1].Input)
+	}
 }
 
 func TestLoadRejectsInvalidMaxRounds(t *testing.T) {
